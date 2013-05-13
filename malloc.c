@@ -85,35 +85,44 @@ void * endHeap(void)
 #endif
 
 
-static Header *morecore(unsigned nu)
+static Header * morecore(unsigned int numUnits)
 {
 	void *cp;
 	Header *up;
+	char * newEnd = NULL;
 	
 	#ifdef MMAP
-		unsigned noPages;
+		unsigned int numPages;
 		if(__endHeap == 0)
 		{
 			__endHeap = sbrk(0);
 		}
 	#endif
 
-	if(nu < NALLOC)
+	if(numUnits < NALLOC)
 	{
-		nu = NALLOC;
+		numUnits = NALLOC;
 	}
 	
 	#ifdef MMAP
-		noPages = ((nu*sizeof(Header))-1)/getpagesize() + 1;
+		/* Number of pages = (number of units * header size - 1) / Size of page + 1) */
+		numPages = ((numUnits * sizeof(Header)) - 1) / getpagesize() + 1;
+		
+		/* Create a memory mapping starting that the end of the heap (if possible) 
+		 * with size equal to the number of pages * the page size 
+		 */
 		cp = mmap(__endHeap, 
-				noPages * getpagesize(), 
+				numPages * getpagesize(), 
 				PROT_READ | PROT_WRITE, 
 				MAP_SHARED | MAP_ANONYMOUS, 
 				-1, 0);
-		nu = (noPages * getpagesize()) / sizeof(Header);
-		__endHeap += noPages * getpagesize();
+				
+		numUnits = (numPages * getpagesize()) / sizeof(Header);
+		newEnd = (char *)__endHeap;
+		newEnd += numPages * getpagesize();
+		__endHeap = (void *) newEnd;
 	#else
-		cp = sbrk(nu*sizeof(Header));
+		cp = sbrk(numUnits * sizeof(Header));
 	#endif
 	
 	/* no space at all */
@@ -122,9 +131,10 @@ static Header *morecore(unsigned nu)
 		perror("failed to get more memory");
 		return NULL;
 	}
+	/* Set page size in the first header of the newly allocated block */
 	up = (Header *) cp;
-	up->s.size = nu;
-	free((void *)(up+1));
+	up->s.size = numUnits;
+	free((void *)(up + 1));
 	return freep;
 }
 
