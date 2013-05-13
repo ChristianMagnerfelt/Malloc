@@ -30,6 +30,13 @@ typedef union header Header;
 static Header base;				/* Empty list to get started */
 static Header *freep = NULL;	/* Start of free list */
 
+int min (int a, int b)
+{
+	if(a < b) 
+		return a;
+	else
+		return b;
+}
 /* free: Put block ap in the free list */
 void free(void * ap)
 {
@@ -137,7 +144,6 @@ static Header * morecore(unsigned int numUnits)
 	free((void *)(up + 1));
 	return freep;
 }
-
 void * malloc(size_t nbytes)
 {
 	Header *p, *prevp;
@@ -146,7 +152,7 @@ void * malloc(size_t nbytes)
 
 	if(nbytes == 0) return NULL;
 
-	nunits = (nbytes+sizeof(Header)-1)/sizeof(Header) +1;
+	nunits = (nbytes + sizeof(Header) - 1) / sizeof(Header) + 1;
 
 	if((prevp = freep) == NULL) 
 	{
@@ -184,5 +190,40 @@ void * malloc(size_t nbytes)
 				return NULL;	/* none left */
 			}
 		}
+	}
+}
+void * realloc(void * oldBlock, size_t newSize)
+{
+	void * newBlock = NULL;
+	Header * oldHeader = NULL;
+	size_t oldSize = 0;
+	
+	if(oldBlock == NULL)
+	{
+		return malloc(newSize);
+	}
+	else if(newSize == 0)
+	{
+		free(oldBlock);
+		return NULL;
+	}
+	else
+	{
+		newBlock = malloc(newSize);
+		
+		/* If malloc fails then we return a NULL ptr */
+		if(newBlock == NULL) return NULL;
+		
+		/* Get the old block header */
+		oldHeader = (Header *) oldBlock - 1;
+		oldSize = (oldHeader->s.size - 1) * sizeof(Header);
+		
+		/* Move the old data to the new area */
+		memmove(newBlock, oldBlock, min(newSize, oldSize));
+		
+		/* Clean up the old data */
+		free(oldBlock);
+		
+		return newBlock;
 	}
 }

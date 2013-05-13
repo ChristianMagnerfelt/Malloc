@@ -10,7 +10,7 @@ CFLAGS	= -g -Wall -ansi -DSTRATEGY=2
 
 XFLAGS	= -g -Wall -DSTRATEGY=2
 
-CC	= gcc -ansi -pedantic -Wall -g -pipe -O -pg
+CC	= gcc -ansi -pedantic -Wall -g -pipe -O0 -pg
 #CC	= gcc 
 
 
