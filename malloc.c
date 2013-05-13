@@ -152,9 +152,15 @@ void * malloc(size_t nbytes)
 
 	if(nbytes == 0) return NULL;
 
+	/* Calculate the number of units in ( Headers ) required 
+	 * to store the given amount of nbytes data */
 	nunits = (nbytes + sizeof(Header) - 1) / sizeof(Header) + 1;
 
-	if((prevp = freep) == NULL) 
+	/* Set previous pointer to point backwards next free block */
+	prevp = freep;
+	/* Nothing have yet been allocated, set everything to point to first element in list and size 
+	 * to 0 */	
+	if(prevp == NULL) 
 	{
 		base.s.ptr = freep = prevp = &base;
 		base.s.size = 0;
@@ -198,12 +204,16 @@ void * realloc(void * oldBlock, size_t newSize)
 	Header * oldHeader = NULL;
 	size_t oldSize = 0;
 	
+	
 	if(oldBlock == NULL)
 	{
+		/* if oldBlock is NULL then we just allocate as normal */
 		return malloc(newSize);
 	}
 	else if(newSize == 0)
 	{
+		/* newSize is zero which means that no data will be moved to 
+		 * the new block (free the old block) */
 		free(oldBlock);
 		return NULL;
 	}
