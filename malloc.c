@@ -22,7 +22,7 @@ union header
 		union header *ptr;		/* Next block if on free list */
     	unsigned size;			/* Size of this block  - what unit? */ 
 	} s;
-	Align x;					/* Force alignment of blocks */
+	Align x;			/* Force alignment of blocks */
 };
 
 typedef union header Header;
@@ -64,14 +64,14 @@ void free(void * ap)
 	}
     /* Join to lower nbr */	
 	if(p + p->s.size == bp)
-	{
-		p->s.size += bp->s.size;
-		p->s.ptr = bp->s.ptr;
-	}
+	  {
+	    p->s.size += bp->s.size;
+	    p->s.ptr = bp->s.ptr;
+	  }
 	else
-	{
-		p->s.ptr = bp;
-	}
+	  {
+	    p->s.ptr = bp;
+	  }
 	freep = p;
 }
 
@@ -162,49 +162,105 @@ void * malloc(size_t nbytes)
 	 * to 0 */	
 	if(prevp == NULL) 
 	{
-		base.s.ptr = freep = prevp = &base;
-		base.s.size = 0;
+	  base.s.ptr = freep = prevp = &base;
+	  base.s.size = 0;
+	}
+
+	/* STRATEGY 1: First fit */
+	if(STRATEGY == 1){
+	  for(p= prevp->s.ptr;  ; prevp = p, p = p->s.ptr)
+	    {
+	      /* big enough */	
+	      if(p->s.size >= nunits)
+		{
+		  /* exactly */
+		  if (p->s.size == nunits)
+		    {                         
+		      prevp->s.ptr = p->s.ptr;
+		    }
+		  else 
+		    {
+		      /* allocate tail end */                                       
+		      p->s.size -= nunits;
+		      p += p->s.size;
+		      p->s.size = nunits;
+		    }
+		  
+		  freep = prevp;
+		  return (void *)(p+1);
+		}
+	      
+	      /* wrapped around free list */
+	      if(p == freep)
+		{                                     
+		  if((p = morecore(nunits)) == NULL)
+		    {
+		      return NULL;	/* none left */
+		    }
+		}
+	    }
 	}
 	
-	for(p= prevp->s.ptr;  ; prevp = p, p = p->s.ptr)
-	{
-		/* big enough */	
-		if(p->s.size >= nunits)
+	/* STRATEGY 2: Best fit */
+	else if(STRATEGY == 2){
+	  /* For saving the smallest block */
+	  Header *smallest = NULL;
+	  Header *smallestPrev = NULL;
+
+
+	  for(p= prevp->s.ptr;  ; prevp = p, p = p->s.ptr)
+	    {
+	      /* Scan for smallest block of size >= nunits */
+	      if(p->s.size >= nunits && 
+		 (smallest == NULL || p->s.size < smallest->s.size))
 		{
-			/* exactly */
-			if (p->s.size == nunits)
-			{                         
-				prevp->s.ptr = p->s.ptr;
-			}
-			else 
-			{
-				/* allocate tail end */                                       
-				p->s.size -= nunits;
-				p += p->s.size;
-				p->s.size = nunits;
-			}
-			
-			freep = prevp;
-			return (void *)(p+1);
+		  /* Found one smaller than previous smallest */
+		  smallest = p;
+		  smallestPrev = prevp;
 		}
-		
-		/* wrapped around free list */
-		if(p == freep)
-		{                                     
-			if((p = morecore(nunits)) == NULL)
-			{
-				return NULL;	/* none left */
-			}
+	    
+
+	      /* Reached end of free list */
+	      if(p == freep)
+		{ 
+		  if(smallest != NULL){
+		    /* We've found a free big enough block, allocate it! */
+		    
+		    if (smallest->s.size == nunits)
+		      {                     
+			/* block fits exactly */
+			smallestPrev->s.ptr = smallest->s.ptr;
+		      }
+		    else 
+		      {
+			/* allocate tail end */                                       
+			smallest->s.size -= nunits;
+			smallest += smallest->s.size;
+			smallest->s.size = nunits;
+		      }
+		    
+		    freep = smallestPrev;
+		    return (void *)(smallest+1);
+		    
+		  }
+		  /* otherwise, get more memory */
+		  else if((p = morecore(nunits)) == NULL)
+		    {
+		      return NULL;	/* none left */
+		    }
 		}
+	    }
 	}
 }
+
 void * realloc(void * oldBlock, size_t newSize)
 {
 	void * newBlock = NULL;
 	Header * oldHeader = NULL;
 	size_t oldSize = 0;
 	
-	
+
+
 	if(oldBlock == NULL)
 	{
 		/* if oldBlock is NULL then we just allocate as normal */

@@ -8,7 +8,10 @@
 void * endHeap(void);
 #endif
 
-#ifndef	_UNISTD_H /* USE WITH CAUTION brk() and sbrk() have been removed from the POSIX standard, most systems implement them but the parameter types may vary */
+#ifndef	_UNISTD_H /* USE WITH CAUTION brk() and sbrk() have
+		     been removed from the POSIX standard, most
+		     systems implement them but the parameter types 
+		     may vary */
 extern int brk(void *);
 extern void *sbrk( );
 #endif
