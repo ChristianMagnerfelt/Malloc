@@ -30,6 +30,16 @@ typedef union header Header;
 static Header base;				/* Empty list to get started */
 static Header *freep = NULL;	/* Start of free list */
 
+/* Number of sepparate free lists, each list increases its 
+ * block size by the power of two */
+#define QF_NUM_LISTS 6
+/* The smallest block size used in the qf lists */	
+int qfMinBlockSize = sizeof(Header) * 2;			
+int qfBlockSizes[QF_NUM_LISTS];			/* List of the block size of each free list */
+static Header qfBase[QF_NUM_LISTS];		/* Empty lists to get started */
+static Header * qfFreep[QF_NUM_LISTS];	/* The start of the free lists */
+
+
 int min (int a, int b)
 {
 	if(a < b) 
@@ -164,6 +174,19 @@ void * malloc(size_t nbytes)
 	{
 	  base.s.ptr = freep = prevp = &base;
 	  base.s.size = 0;
+	  
+	  /* Inititalize qf free lists */
+	  {
+	  	int i;
+	  	int size = qfMinBlockSize;
+	  	for(i = 0; i < QF_NUM_LISTS; i++)
+	  	{
+	  		qfBlockSizes[i] = size;		/* Set block size of the current free list */
+	  		size *= 2;					/* Increase block size by the poer of two */
+	  		qfBase[i].s.ptr = qfFreep[i] = &qfBase[i];
+	  		qfBase[i].s.size = 0;
+	  	}
+	  }
 	}
 
 	/* STRATEGY 1: First fit */
@@ -250,6 +273,29 @@ void * malloc(size_t nbytes)
 		    }
 		}
 	    }
+	}
+	/* STRATEGY 5: Quick fit */
+	else if(STRATEGY == 4)
+	{
+		/* Check if block fits in one of the qf free lists */
+		if((nunits * sizeof(Header)) < qfBlockSizes[QF_NUM_LISTS - 1])
+		{
+			/* Get the index of the list with the most optimal fit */
+			int i;
+			for(i = 0; i < QF_NUM_LISTS; i++)
+			{
+				if(qfBlockSizes[i] > (nunits * sizeof(Header)))
+					prevp = qfFreep[i];
+			}
+			/* Search list for free block */
+		
+			/* If no free block in list allocate more */			
+		}
+		/* If block is big use first fit instead */
+		else
+		{
+		
+		}
 	}
 }
 
