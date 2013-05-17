@@ -33,12 +33,11 @@ static Header *freep = NULL;	/* Start of free list */
 /* Number of sepparate free lists, each list increases its 
  * block size by the power of two */
 #define QF_NUM_LISTS 6
-/* The smallest block size used in the qf lists */	
-int qfMinBlockSize = sizeof(Header) * 2;			
+/* The minimum size is two units where each unit is equal to the sizeof(Header)	*/
+int qfMinBlockSize = 2;						
 int qfBlockSizes[QF_NUM_LISTS];			/* List of the block size of each free list */
-static Header qfBase[QF_NUM_LISTS];		/* Empty lists to get started */
-static Header * qfFreep[QF_NUM_LISTS];	/* The start of the free lists */
-
+static Header qfBase[QF_NUM_LISTS + 1];		/* Empty lists to get started */
+static Header * qfFreep[QF_NUM_LISTS + 1];	/* The start of the free lists */
 
 int min (int a, int b)
 {
@@ -101,7 +100,6 @@ void * endHeap(void)
 }
 #endif
 
-
 static Header * morecore(unsigned int numUnits)
 {
 	void *cp;
@@ -154,13 +152,11 @@ static Header * morecore(unsigned int numUnits)
 	free((void *)(up + 1));
 	return freep;
 }
-void * malloc(size_t nbytes)
+void * firstFitMalloc(size_t nbytes)
 {
 	Header *p, *prevp;
 	Header * morecore(unsigned);
 	unsigned nunits;
-
-	if(nbytes == 0) return NULL;
 
 	/* Calculate the number of units in ( Headers ) required 
 	 * to store the given amount of nbytes data */
@@ -174,128 +170,193 @@ void * malloc(size_t nbytes)
 	{
 	  base.s.ptr = freep = prevp = &base;
 	  base.s.size = 0;
-	  
-	  /* Inititalize qf free lists */
-	  {
-	  	int i;
-	  	int size = qfMinBlockSize;
-	  	for(i = 0; i < QF_NUM_LISTS; i++)
-	  	{
-	  		qfBlockSizes[i] = size;		/* Set block size of the current free list */
-	  		size *= 2;					/* Increase block size by the poer of two */
-	  		qfBase[i].s.ptr = qfFreep[i] = &qfBase[i];
-	  		qfBase[i].s.size = 0;
-	  	}
-	  }
+	}
+		
+	for(p= prevp->s.ptr;  ; prevp = p, p = p->s.ptr)
+	{
+		/* big enough */	
+		if(p->s.size >= nunits)
+		{
+			/* exactly */
+			if (p->s.size == nunits)
+			{                         
+				prevp->s.ptr = p->s.ptr;
+			}
+			else 
+			{
+				/* allocate tail end */                                       
+				p->s.size -= nunits;
+				p += p->s.size;
+				p->s.size = nunits;
+			}
+
+			freep = prevp;
+			return (void *)(p+1);
+		}
+
+		/* wrapped around free list */
+		if(p == freep)
+		{                                     
+			if((p = morecore(nunits)) == NULL)
+			{
+				return NULL;	/* none left */
+			}
+		}
 	}
 
-	/* STRATEGY 1: First fit */
-	if(STRATEGY == 1){
-	  for(p= prevp->s.ptr;  ; prevp = p, p = p->s.ptr)
-	    {
-	      /* big enough */	
-	      if(p->s.size >= nunits)
+}
+void * bestFitMalloc(size_t nbytes)
+{
+	Header *p, *prevp;
+	Header * morecore(unsigned);
+	unsigned nunits;
+	
+	/* For saving the smallest block */
+	Header *smallest = NULL;
+	Header *smallestPrev = NULL;	
+
+	/* Calculate the number of units in ( Headers ) required 
+	 * to store the given amount of nbytes data */
+	nunits = (nbytes + sizeof(Header) - 1) / sizeof(Header) + 1;
+	
+	/* Set previous pointer to point backwards next free block */
+	prevp = freep;
+	/* Nothing have yet been allocated, set everything to point to first element in list and size 
+	 * to 0 */	
+	if(prevp == NULL) 
+	{
+	  base.s.ptr = freep = prevp = &base;
+	  base.s.size = 0;
+	}
+
+	for(p= prevp->s.ptr;  ; prevp = p, p = p->s.ptr)
+	{
+		/* Scan for smallest block of size >= nunits */
+		if(p->s.size >= nunits && (smallest == NULL 
+			|| p->s.size < smallest->s.size))
 		{
-		  /* exactly */
-		  if (p->s.size == nunits)
-		    {                         
-		      prevp->s.ptr = p->s.ptr;
-		    }
-		  else 
-		    {
-		      /* allocate tail end */                                       
-		      p->s.size -= nunits;
-		      p += p->s.size;
-		      p->s.size = nunits;
-		    }
-		  
-		  freep = prevp;
-		  return (void *)(p+1);
+			/* Found one smaller than previous smallest */
+			smallest = p;
+			smallestPrev = prevp;
 		}
-	      
-	      /* wrapped around free list */
-	      if(p == freep)
-		{                                     
-		  if((p = morecore(nunits)) == NULL)
-		    {
-		      return NULL;	/* none left */
-		    }
+
+		/* Reached end of free list */
+		if(p == freep)
+		{ 
+			if(smallest != NULL)
+			{
+				/* We've found a free big enough block, allocate it! */
+				if (smallest->s.size == nunits)
+				{                     
+					/* block fits exactly */
+					smallestPrev->s.ptr = smallest->s.ptr;
+				}
+				else 
+				{
+					/* allocate tail end */                                       
+					smallest->s.size -= nunits;
+					smallest += smallest->s.size;
+					smallest->s.size = nunits;
+				}
+
+				freep = smallestPrev;
+				return (void *)(smallest+1);
+			}
+			/* otherwise, get more memory */
+			else if((p = morecore(nunits)) == NULL)
+			{
+				return NULL;	/* none left */
+			}
 		}
-	    }
+	}		
+}
+void * quickFitMalloc(size_t nbytes)
+{
+	Header *p, *prevp;
+	Header * morecore(unsigned);
+	unsigned nunits;	
+	int idx;
+	
+	if(nbytes > qfBlockSizes[QF_NUM_LISTS - 1])
+	{
+		return firstFitMalloc(nbytes);
+	}
+	else
+	{
+		/* Get the index of the list with the most optimal fit */
+		for(idx = 0; idx < QF_NUM_LISTS; idx++)
+		{
+			if(qfBlockSizes[idx] >= nunits) break;
+		}
 	}
 	
-	/* STRATEGY 2: Best fit */
-	else if(STRATEGY == 2){
-	  /* For saving the smallest block */
-	  Header *smallest = NULL;
-	  Header *smallestPrev = NULL;
-
-
-	  for(p= prevp->s.ptr;  ; prevp = p, p = p->s.ptr)
-	    {
-	      /* Scan for smallest block of size >= nunits */
-	      if(p->s.size >= nunits && 
-		 (smallest == NULL || p->s.size < smallest->s.size))
+	prevp = qfFreep[idx];
+	
+	/* Calculate the number of units in ( Headers ) required 
+	 * to store the given amount of nbytes data */
+	nunits = (nbytes + sizeof(Header) - 1) / sizeof(Header) + 1;	
+	
+	/* If this is the first allocation initialize free list */
+	if(prevp == NULL)
+	{
+		int i;
+		int size = qfMinBlockSize;
+		for(i = 0; i < QF_NUM_LISTS; i++)
 		{
-		  /* Found one smaller than previous smallest */
-		  smallest = p;
-		  smallestPrev = prevp;
+			qfBlockSizes[i] = size;		/* Set block size of the current free list */
+			size *= 2;					/* Increase block size by the poer of two */
+			qfBase[i].s.ptr = qfFreep[i] = &qfBase[i];
+			qfBase[i].s.size = 0;
 		}
-	    
+		qfBase[i].s.ptr = qfFreep[i] = &qfBase[i];
+		qfBase[i].s.size = 0;
+	}		
 
-	      /* Reached end of free list */
-	      if(p == freep)
-		{ 
-		  if(smallest != NULL){
-		    /* We've found a free big enough block, allocate it! */
-		    
-		    if (smallest->s.size == nunits)
-		      {                     
-			/* block fits exactly */
-			smallestPrev->s.ptr = smallest->s.ptr;
-		      }
-		    else 
-		      {
-			/* allocate tail end */                                       
-			smallest->s.size -= nunits;
-			smallest += smallest->s.size;
-			smallest->s.size = nunits;
-		      }
-		    
-		    freep = smallestPrev;
-		    return (void *)(smallest+1);
-		    
-		  }
-		  /* otherwise, get more memory */
-		  else if((p = morecore(nunits)) == NULL)
-		    {
-		      return NULL;	/* none left */
-		    }
-		}
-	    }
+	p = prevp->s.ptr;
+	
+	if(p->s.size >= nunits)
+	{
+		p->s.size -= nunits;
+		p += qfBlockSizes[idx];
+		p->s.size = nunits;
+		qfFreep[idx] = prevp;
+		return (void *)(p + 1);
 	}
-	/* STRATEGY 5: Quick fit */
+
+	/* No free block in free list, get more */                                  
+	if((p = morecore(nunits)) == NULL)
+	{
+		return NULL;	/* none left */
+	}		
+	prevp = p;
+	p = p->s.ptr;
+
+	p->s.size -= nunits;
+	p += qfBlockSizes[idx];
+	p->s.size = nunits;
+	qfFreep[idx] = prevp;
+	return (void *)(p + 1);		
+}
+void * malloc(size_t nbytes)
+{
+	if(nbytes == 0) 
+	{
+		return NULL;
+	}	
+	/* STRATEGY 1: First fit */
+	else if(STRATEGY == 1)
+	{
+		firstFitMalloc(nbytes);
+	}
+	/* STRATEGY 2: Best fit */
+	else if(STRATEGY == 2)
+	{
+		bestFitMalloc(nbytes);
+	}
+	/* STRATEGY 4: Quick fit */
 	else if(STRATEGY == 4)
 	{
-		/* Check if block fits in one of the qf free lists */
-		if((nunits * sizeof(Header)) < qfBlockSizes[QF_NUM_LISTS - 1])
-		{
-			/* Get the index of the list with the most optimal fit */
-			int i;
-			for(i = 0; i < QF_NUM_LISTS; i++)
-			{
-				if(qfBlockSizes[i] > (nunits * sizeof(Header)))
-					prevp = qfFreep[i];
-			}
-			/* Search list for free block */
-		
-			/* If no free block in list allocate more */			
-		}
-		/* If block is big use first fit instead */
-		else
-		{
-		
-		}
+		quickFitMalloc(nbytes);
 	}
 }
 
