@@ -8,7 +8,7 @@
  *	Christian Magnerfelt <christian.magnerfelt@gmail.com>
  */
 
-#ifdef CUSTOM
+#ifdef STRATEGY
 #include "malloc.c"
 #else
 #include <stdlib.h>
@@ -16,21 +16,25 @@
 
 #include <stdbool.h>
 #include <stdio.h>
-#include "tst.h"
 
-/* Used for tstmemory */
-#define SIZE 128
-#define BIGSIZE 100
-#define TIMES 100
-#define BIGTIMES 10
-#define SMALLSTRING 64
-#define TIMESPAGE 10
+#include <sys/time.h>
+#include <sys/resource.h>
 
+#define TIMES 1  /* How many times to do each thing (for timing) */
 #define MAX(a,b) ((a > b) ? (a) : (b))
 
-char *progname;
+/* Get current memory usage */
+int getCurrMemUsage(void);
 
-	
+/* Get current end address of heap */
+void * getEndHeap(void);
+
+/* Gets the current timestamp in milliseconds */
+long getCurrentTimeMillis();
+
+char *progname;
+int sizes[30] = {15, 28, 17, 19, 22, 12, 26, 5, 18, 7, 29, 16, 6, 14,\
+                 21, 20, 13, 8, 11, 24, 27, 1, 9, 4, 10, 23, 30, 3, 25, 2}; 
 
 int main(int argc, char *argv[])
 {
@@ -39,114 +43,231 @@ int main(int argc, char *argv[])
   else
     progname = "";
 
-	#ifdef CUSTOM
-	fprintf(stderr, "Evaluating custom malloc.\n");	
-	fprintf(stderr, "Strategy: %d\n", STRATEGY);
-	#else
-	fprintf(stderr, "Evaluating system (stdlib) malloc.\n");	
-	#endif
+  #ifdef STRATEGY
+  fprintf(stderr, "Evaluating custom malloc.\n");  
+  fprintf(stderr, "Strategy: %d\n", STRATEGY);
+  #else
+  fprintf(stderr, "Evaluating system (stdlib) malloc.\n");  
+  #endif
 
-/*	tstmemory(argc, argv);*/
-
-	char *ptr;
-	ptr = malloc(2000);
-	ptr = "heafasfasfasfs";
-	MESSAGE(ptr);
-	
-	return 0;
-}
-
-#ifdef MMAP
-#ifndef CUSTOM
-static void * __endHeap = 0;
-
-void * endHeap(void)
-{
-  if(__endHeap == 0) 
-  {
-  	__endHeap = sbrk(0);
+  if(fork() == 0){
+    evalSmallPieces();
+    return 0;
   }
-  return __endHeap;
-}
-#endif
-#endif
+  wait(NULL);
+  if(fork() == 0){
+    evalTypicalUse();
+    return 0;
+  }
+  wait(NULL);
+  if(fork() == 0){
+    evalFragmentedList();
+    return 0;
+  }
+  wait(NULL);
+  if(fork() == 0){
+    evalBadBestFit();
+    return 0;
+  }
+  wait(NULL);
 
-void tstmemory(int argc, char *argv[])
-{
-  int i,j;
-  float worst;
-  char *a[SIZE], *b[BIGSIZE];
-  size_t pagesize;
-  void * lowbreak, *highbreak, *maxbreak = 0;
+  return 0;
+}
+
+/**
+ * Allocates a lot of small pieces of memory.
+ */
+void evalSmallPieces(){
+  void * startMemory, *endMemory;
+  int t, i;
+  int N = 9000;
+  void * addr[N];
+  long timeMillis = 0;
   
-  /* to generate big memory refs later */
-  pagesize = sysconf(_SC_PAGESIZE);
+  for(t = 0; t < TIMES; t++){
+    if(t == 0){
+      startMemory = getEndHeap();
+    }
 
-  MESSAGE("Testing memory utility\n");
+    long  tmpTime = getCurrentTimeMillis();
+    for(i = 0; i < N; i++){
+      addr[i] = malloc(1024);
+    }
+    long timed = (getCurrentTimeMillis()-tmpTime);
 
-#ifdef MMAP
-  lowbreak = endHeap();
-#else
-  lowbreak = (void *) sbrk(0);
-#endif
+    /*fprintf(stderr, "Time to malloc: %li\n", timed);*/
+    timeMillis += timed;
+    
+    if(t == 0){
+      endMemory  = getEndHeap();
+    }
 
-  MESSAGE("Getting small pieces of memory\n");
-  for(i = 0; i < TIMES; i++){
-    for(j = 0; j < SIZE; j++){
-      a[j] = malloc(SMALLSTRING);
+    /*
+    for(i = 0; i < N; i++){
+      free(addr[i]);
+    } */
+  }
+
+  timeMillis = timeMillis/TIMES;
+  
+  printEvalResults("evalSmallPieces", startMemory, endMemory, timeMillis);
+}
+
+/*
+  Allocate memory of sizes between 1 and 30 KB (simulating typical use)
+*/
+void evalTypicalUse(){
+  void * startMemory, *endMemory;
+  int t, i;
+  int N = 9000;
+  void * addr[N];
+  long timeMillis = 0;
+
+  for(t = 0; t < TIMES; t++){
+    if(t == 0){
+      startMemory = getEndHeap();
+    }
+
+    long tmpTime = getCurrentTimeMillis();
+    for(i = 0; i < N; i++){
+      addr[i] = malloc(sizes[i%30]*1024);
+    }
+    long timed = (getCurrentTimeMillis()-tmpTime);
+
+    /*fprintf(stderr, "Time to malloc: %li\n", timed);*/
+    timeMillis += timed;
+    
+    if(t == 0){
+      endMemory  = getEndHeap();
+    }
+
+    for(i = 0; i < N; i++){
+      free(addr[i]);
     } 
-#ifdef MMAP
-    highbreak = endHeap();
-#else
-    highbreak = (void *) sbrk(0);
-#endif
-    maxbreak = MAX(maxbreak, highbreak);
-    for(j = 0; j < SIZE; j++){
-      free(a[j]);
-    }
-    if ( i % 10 == 0 ) 
-      fprintf(stderr, "%s: Using total of 0x%x of memory\n",
-	      progname, (unsigned) (highbreak - lowbreak)); 
-
   }
 
-  worst = (maxbreak - lowbreak)/ (SMALLSTRING * SIZE * 1.0);
-  fprintf(stderr, "%s: Using %2.2f times worst case calculation\n", 
-	  progname, worst);
-  if ( worst > 2 ) {
-    MESSAGE("* ERROR: Test indicates excessive memory usage\n");
-  } else {
-    MESSAGE("Small memory handled OK\n");
+  timeMillis = timeMillis/TIMES;
+  
+  printEvalResults("evalTypicalUse", startMemory, endMemory, timeMillis);
+}
+
+/**
+  Allocate memory, free some, then allocate some more to evaluate how the
+  algorithms cope with a fragmented list with a lot of free memory.
+*/
+void evalFragmentedList(){
+  void * startMemory, *endMemory;
+  int i;
+  int N = 9000;
+  void * addr[N];
+  long timeMillis = 0;
+
+  startMemory = getEndHeap();
+
+  /* Allocate all 9000 blocks of sizes 1-30 kB */
+  long tmpTime = getCurrentTimeMillis();
+  for(i = 0; i < N; i++){
+    addr[i] = malloc(sizes[i%30]*1024);
+  }
+  long timed = (getCurrentTimeMillis()-tmpTime);
+  timeMillis += timed;
+
+  /* Free 1000 blocks (every 9th) */
+  for(i = 0; i < 1000; i++){
+    free(addr[i*9]);
   }
 
-  MESSAGE("Getting big blocks of memory\n");
-  for(i = 0; i < BIGTIMES; i++){
-    for(j = 0; j < BIGSIZE; j++){
-      b[j] = malloc(TIMESPAGE*pagesize);
-    }
-#ifdef MMAP
-    highbreak = endHeap();
-#else
-    highbreak = (void *) sbrk(0);
-#endif
-
-    maxbreak = MAX(maxbreak, highbreak);
-    for(j = 0; j < BIGSIZE; j++){
-      free(b[j]);
-    }
-    fprintf(stderr, "%s: Using total of 0x%x of memory\n", 
-	    progname, (unsigned) (highbreak - lowbreak));
-
+  /* Allocate 1000 blocks again */
+  tmpTime = getCurrentTimeMillis();
+  for(i = 0; i < 1000; i++){
+    addr[i*9] = malloc(sizes[i%30]*1024);
   }
-  MESSAGE("Allocations versus worst case memory usage:\n");
-  worst = (maxbreak - lowbreak)/ (BIGSIZE * pagesize * TIMESPAGE * 1.0);
-  fprintf(stderr, 
-	  "%s: Using %2.2f times worst case calculation\n", 
-	  progname, worst);
-  if ( worst > 2 ) {
-    MESSAGE("* ERROR: Test indicates excessive memory usage\n");
-  } else {
-    MESSAGE("Big memory handled OK\n");
+  timeMillis += (getCurrentTimeMillis()-tmpTime);
+
+  endMemory = getEndHeap();
+
+  printEvalResults("evalFragmentedList", startMemory, endMemory, timeMillis);
+}
+
+/**
+  Allocate a lot of memory, free everything and allocate it again; best fit
+  should give worse performance than first, because first will find a free
+  block right away while best fit will search the whole list every time.
+*/
+void evalBadBestFit(){
+  void * startMemory, *endMemory;
+  int i;
+  int N = 9000;
+  void * addr[N];
+  long timeMillis = 0;
+
+  startMemory = getEndHeap();
+
+  /* Allocate all N blocks of sizes 1 kB */
+  long tmpTime = getCurrentTimeMillis();
+  for(i = 0; i < N; i++){
+    addr[i] = malloc(1024);
+  }
+  long timed = (getCurrentTimeMillis()-tmpTime);
+  timeMillis += timed;
+
+  /* Free N blocks */
+  for(i = 0; i < N; i++){
+    free(addr[i]);
   }
 
+  /* Allocate N blocks again */
+  tmpTime = getCurrentTimeMillis();
+  for(i = 0; i < N; i++){
+    addr[i] = malloc(1024);
+  }
+  timeMillis += (getCurrentTimeMillis()-tmpTime);
+
+  endMemory = getEndHeap();
+
+  printEvalResults("evalBadBestFit", startMemory, endMemory, timeMillis);
+}
+/**
+ * Returns the program size (virtual memory) in kB
+ */
+int getCurrMemUsage(){
+  FILE *statm = fopen("/proc/self/statm", "r");
+	int size;
+	int res = fscanf(statm, "%d", &size);
+  fclose(statm);
+	return (res == 0 ? -1 : size);
+}
+
+/**
+ * Returns the current heap end position.
+ */
+void * getEndHeap(){
+	#ifdef STRATEGY
+  /* We're testing custom malloc, use endHeap */
+  return endHeap();
+  #else
+  /* We're testing built-in malloc, use sbrk */
+  return (void *) sbrk(0);
+  #endif
+}
+
+/**
+  * Prints the results of an evaluation method like this:
+  *     EVALUTION_METHOD_NAME   MEMORY_USED(KB)   TIME(MS)
+  */
+void printEvalResults(char * evalType, void * startMemory, void *endMemory, long ms){
+  fprintf(stderr, "%s\t%d\t%li\n", evalType,
+                                    (endMemory-startMemory)/getpagesize(),
+                                    ms);
+}
+
+/**
+* Returns the current time in milliseconds (based on the time since the Epoch).
+*/
+long getCurrentTimeMillis()
+{
+  struct timeval tv;
+  gettimeofday(&tv, NULL);
+
+  return 1000*(tv.tv_sec % 10000)+ (tv.tv_usec/1000);
 }
