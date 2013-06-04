@@ -18,6 +18,10 @@
 
 #include <stdbool.h>
 #include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>   
 
 #include <sys/time.h>
 #include <sys/resource.h>
@@ -33,7 +37,22 @@ int getCurrMemUsage(void);
 void * getEndHeap(void);
 
 /* Gets the current timestamp in milliseconds */
-long getCurrentTimeMillis();
+long getCurrentTimeMillis(void);
+
+/* Test methods */
+void evalSmallPieces(void);
+void evalTypicalUse(void);
+void evalFragmentedList(void);
+void evalBadBestFit(void);
+
+/* For printing */
+void printEvalResults(int, long);
+
+/* Calculates how much memory was used when using endHeap and statm 
+   respectively (returned as kB)
+ */ 
+int getUsedMemoryHeap(void *, void *);
+int getUsedMemoryStatm(int, int);
 
 char *progname;
 int sizes[30] = {15, 28, 17, 19, 22, 12, 26, 5, 18, 7, 29, 16, 6, 14,\
@@ -46,16 +65,16 @@ int main(int argc, char *argv[])
   int i;
   if (argc > 1)
     progname = argv[0];
-    if(!strcmp(&argv[1], "0")) useEndHeap = false;
-    else if(!strcmp(&argv[1], "1")) useEndHeap = true;
+    if(!strcmp((const char *)&argv[1], "0")) useEndHeap = false;
+    else if(!strcmp((const char *)&argv[1], "1")) useEndHeap = true;
   else
     progname = "";
 
   #ifdef STRATEGY
-  fprintf(stderr, "Evaluating custom malloc.\n");  
-  fprintf(stderr, "Strategy: %d\n", STRATEGY);
+  printf("Evaluating custom malloc.\n");  
+  printf("Strategy: %d\n", STRATEGY);
   #else
-  fprintf(stderr, "Evaluating system (stdlib) malloc.\n");  
+  printf("Evaluating system (stdlib) malloc.\n");  
   #endif
 
   printf("evalSmallPieces\n");
@@ -106,9 +125,8 @@ void evalSmallPieces(){
   int startStatm, endStatm; 
   int t, i;
   int N = 9000;
-  void * addr[N];
-  long timeMillis = 0;
   
+  long timeMillis = 0;
   for(t = 0; t < TIMES; t++){
     if(t == 0){
       startMemory = getEndHeap();
@@ -117,7 +135,7 @@ void evalSmallPieces(){
 
     long  tmpTime = getCurrentTimeMillis();
     for(i = 0; i < N; i++){
-      addr[i] = malloc(1024);
+      void * ptr = malloc(1024);
     }
     long timed = (getCurrentTimeMillis()-tmpTime);
 
@@ -316,7 +334,7 @@ void * getEndHeap(){
   *     MEMORY_USED(kB)   TIME(ms)
   */
 void printEvalResults(int memoryUsed, long ms){
-  printf("%d\t%d\n", memoryUsed, ms); 
+  printf("%d\t%li\n", memoryUsed, ms); 
 }
 
 /**
