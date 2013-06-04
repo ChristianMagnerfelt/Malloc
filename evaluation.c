@@ -125,8 +125,9 @@ void evalSmallPieces(){
   int startStatm, endStatm; 
   int t, i;
   int N = 9000;
-  
+  void * addr[N];
   long timeMillis = 0;
+  
   for(t = 0; t < TIMES; t++){
     if(t == 0){
       startMemory = getEndHeap();
@@ -135,7 +136,7 @@ void evalSmallPieces(){
 
     long  tmpTime = getCurrentTimeMillis();
     for(i = 0; i < N; i++){
-      void * ptr = malloc(1024);
+      addr[i] = malloc(1024);
     }
     long timed = (getCurrentTimeMillis()-tmpTime);
 
