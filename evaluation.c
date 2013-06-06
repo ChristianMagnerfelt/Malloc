@@ -1,3 +1,5 @@
+/*gcc -O4 -DSTRATEGY=2 evaluation.c -o EvalCust && gcc -O4 evaluation.c -o EvalStd && ./EvalStd && echo "" && ./EvalCust */
+
 /*
  * DESCRIPTION:
  *  A test suite for evaluating the performance of our custom malloc
@@ -16,12 +18,17 @@
 
 #include <stdbool.h>
 #include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>   
 
 #include <sys/time.h>
 #include <sys/resource.h>
 
 #define TIMES 1  /* How many times to do each thing (for timing) */
 #define MAX(a,b) ((a > b) ? (a) : (b))
+#define RUNS 10   /* Hów many times to run each test */
 
 /* Get current memory usage */
 int getCurrMemUsage(void);
@@ -30,46 +37,82 @@ int getCurrMemUsage(void);
 void * getEndHeap(void);
 
 /* Gets the current timestamp in milliseconds */
-long getCurrentTimeMillis();
+long getCurrentTimeMillis(void);
+
+/* Test methods */
+void evalSmallPieces(void);
+void evalTypicalUse(void);
+void evalFragmentedList(void);
+void evalBadBestFit(void);
+
+/* For printing */
+void printEvalResults(int, long);
+
+/* Calculates how much memory was used when using endHeap and statm 
+   respectively (returned as kB)
+ */ 
+int getUsedMemoryHeap(void *, void *);
+int getUsedMemoryStatm(int, int);
 
 char *progname;
 int sizes[30] = {15, 28, 17, 19, 22, 12, 26, 5, 18, 7, 29, 16, 6, 14,\
                  21, 20, 13, 8, 11, 24, 27, 1, 9, 4, 10, 23, 30, 3, 25, 2}; 
 
+bool useEndHeap = true;
+
 int main(int argc, char *argv[])
 {
-  if (argc > 0)
+  int i;
+  if (argc > 1)
     progname = argv[0];
+    if(!strcmp((const char *)&argv[1], "0")) useEndHeap = false;
+    else if(!strcmp((const char *)&argv[1], "1")) useEndHeap = true;
   else
     progname = "";
 
   #ifdef STRATEGY
-  fprintf(stderr, "Evaluating custom malloc.\n");  
-  fprintf(stderr, "Strategy: %d\n", STRATEGY);
+  printf("Evaluating custom malloc.\n");  
+  printf("Strategy: %d\n", STRATEGY);
   #else
-  fprintf(stderr, "Evaluating system (stdlib) malloc.\n");  
+  printf("Evaluating system (stdlib) malloc.\n");  
   #endif
 
-  if(fork() == 0){
-    evalSmallPieces();
-    return 0;
+  printf("evalSmallPieces\n");
+  for(i = 0; i<RUNS; i++){
+      if(fork() == 0){
+      evalSmallPieces();
+      return 0;
+    }
+    wait(NULL);
   }
-  wait(NULL);
-  if(fork() == 0){
-    evalTypicalUse();
-    return 0;
+  
+  printf("evalTypicalUse\n");
+  for(i = 0; i<RUNS; i++){
+    if(fork() == 0){
+      evalTypicalUse();
+      return 0;
+    }
+    wait(NULL);
   }
-  wait(NULL);
-  if(fork() == 0){
-    evalFragmentedList();
-    return 0;
+  
+  printf("evalFragmentedList\n");
+  for(i = 0; i<RUNS; i++){
+    if(fork() == 0){
+      evalFragmentedList();
+      return 0;
+    }
+    wait(NULL);
   }
-  wait(NULL);
-  if(fork() == 0){
-    evalBadBestFit();
-    return 0;
+  
+  printf("evalBadBestFit\n");
+
+  for(i = 0; i<RUNS; i++){
+    if(fork() == 0){
+      evalBadBestFit();
+      return 0;
+    }
+    wait(NULL);
   }
-  wait(NULL);
 
   return 0;
 }
@@ -79,6 +122,7 @@ int main(int argc, char *argv[])
  */
 void evalSmallPieces(){
   void * startMemory, *endMemory;
+  int startStatm, endStatm; 
   int t, i;
   int N = 9000;
   void * addr[N];
@@ -87,6 +131,7 @@ void evalSmallPieces(){
   for(t = 0; t < TIMES; t++){
     if(t == 0){
       startMemory = getEndHeap();
+      startStatm = getCurrMemUsage();
     }
 
     long  tmpTime = getCurrentTimeMillis();
@@ -100,6 +145,7 @@ void evalSmallPieces(){
     
     if(t == 0){
       endMemory  = getEndHeap();
+      endStatm = getCurrMemUsage();
     }
 
     /*
@@ -110,7 +156,13 @@ void evalSmallPieces(){
 
   timeMillis = timeMillis/TIMES;
   
-  printEvalResults("evalSmallPieces", startMemory, endMemory, timeMillis);
+  if(useEndHeap){
+    int memUsed = getUsedMemoryHeap(startMemory, endMemory);
+    printEvalResults(memUsed, timeMillis);
+  }else{
+    int memUsed = getUsedMemoryStatm(startStatm, endStatm);
+    printEvalResults(memUsed, timeMillis);
+  }
 }
 
 /*
@@ -118,6 +170,7 @@ void evalSmallPieces(){
 */
 void evalTypicalUse(){
   void * startMemory, *endMemory;
+  int startStatm, endStatm; 
   int t, i;
   int N = 9000;
   void * addr[N];
@@ -126,6 +179,7 @@ void evalTypicalUse(){
   for(t = 0; t < TIMES; t++){
     if(t == 0){
       startMemory = getEndHeap();
+      startStatm = getCurrMemUsage();
     }
 
     long tmpTime = getCurrentTimeMillis();
@@ -139,6 +193,7 @@ void evalTypicalUse(){
     
     if(t == 0){
       endMemory  = getEndHeap();
+      endStatm = getCurrMemUsage();
     }
 
     for(i = 0; i < N; i++){
@@ -148,7 +203,13 @@ void evalTypicalUse(){
 
   timeMillis = timeMillis/TIMES;
   
-  printEvalResults("evalTypicalUse", startMemory, endMemory, timeMillis);
+  if(useEndHeap){
+    int memUsed = getUsedMemoryHeap(startMemory, endMemory);
+    printEvalResults(memUsed, timeMillis);
+  }else{
+    int memUsed = getUsedMemoryStatm(startStatm, endStatm);
+    printEvalResults(memUsed, timeMillis);
+  }
 }
 
 /**
@@ -157,12 +218,14 @@ void evalTypicalUse(){
 */
 void evalFragmentedList(){
   void * startMemory, *endMemory;
+  int startStatm, endStatm;
   int i;
   int N = 9000;
   void * addr[N];
   long timeMillis = 0;
 
   startMemory = getEndHeap();
+  startStatm = getCurrMemUsage();
 
   /* Allocate all 9000 blocks of sizes 1-30 kB */
   long tmpTime = getCurrentTimeMillis();
@@ -185,8 +248,15 @@ void evalFragmentedList(){
   timeMillis += (getCurrentTimeMillis()-tmpTime);
 
   endMemory = getEndHeap();
+  endStatm = getCurrMemUsage();
 
-  printEvalResults("evalFragmentedList", startMemory, endMemory, timeMillis);
+  if(useEndHeap){
+    int memUsed = getUsedMemoryHeap(startMemory, endMemory);
+    printEvalResults(memUsed, timeMillis);
+  }else{
+    int memUsed = getUsedMemoryStatm(startStatm, endStatm);
+    printEvalResults(memUsed, timeMillis);
+  }
 }
 
 /**
@@ -196,12 +266,14 @@ void evalFragmentedList(){
 */
 void evalBadBestFit(){
   void * startMemory, *endMemory;
+  int startStatm, endStatm;
   int i;
   int N = 9000;
   void * addr[N];
   long timeMillis = 0;
 
   startMemory = getEndHeap();
+  startStatm = getCurrMemUsage();
 
   /* Allocate all N blocks of sizes 1 kB */
   long tmpTime = getCurrentTimeMillis();
@@ -224,8 +296,15 @@ void evalBadBestFit(){
   timeMillis += (getCurrentTimeMillis()-tmpTime);
 
   endMemory = getEndHeap();
+  endStatm = getCurrMemUsage();
 
-  printEvalResults("evalBadBestFit", startMemory, endMemory, timeMillis);
+  if(useEndHeap){
+    int memUsed = getUsedMemoryHeap(startMemory, endMemory);
+    printEvalResults(memUsed, timeMillis);
+  }else{
+    int memUsed = getUsedMemoryStatm(startStatm, endStatm);
+    printEvalResults(memUsed, timeMillis);
+  }
 }
 /**
  * Returns the program size (virtual memory) in kB
@@ -252,13 +331,11 @@ void * getEndHeap(){
 }
 
 /**
-  * Prints the results of an evaluation method like this:
-  *     EVALUTION_METHOD_NAME   MEMORY_USED(KB)   TIME(MS)
+  * Prints the results to stdout like this:
+  *     MEMORY_USED(kB)   TIME(ms)
   */
-void printEvalResults(char * evalType, void * startMemory, void *endMemory, long ms){
-  fprintf(stderr, "%s\t%d\t%li\n", evalType,
-                                    (endMemory-startMemory)/getpagesize(),
-                                    ms);
+void printEvalResults(int memoryUsed, long ms){
+  printf("%d\t%li\n", memoryUsed, ms); 
 }
 
 /**
@@ -270,4 +347,12 @@ long getCurrentTimeMillis()
   gettimeofday(&tv, NULL);
 
   return 1000*(tv.tv_sec % 10000)+ (tv.tv_usec/1000);
+}
+
+int getUsedMemoryHeap(void * start, void * end){
+  return (unsigned)(end-start)/getpagesize();
+}
+
+int getUsedMemoryStatm(int start, int end){
+  return end - start;
 }
